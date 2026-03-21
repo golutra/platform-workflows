@@ -120,7 +120,35 @@ jobs:
               "Third-Party / Copied / Adapted Code Disclosure",
               "AI Assistance Disclosure"
             );
-            const aiDisclosure = extractSection("AI Assistance Disclosure", "");
+            const aiDisclosure = extractSection("AI Assistance Disclosure", "Co-author Disclosure");
+            const coAuthorDisclosure = extractSection("Co-author Disclosure", "");
+            const commitLogins = new Set([prAuthorLogin.toLowerCase()]);
+            const coAuthorEntries = [];
+
+            const loadCommitMetadata = async () => {
+              const commits = await github.paginate(github.rest.pulls.listCommits, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                per_page: 100
+              });
+              const coAuthorPattern = /^Co-authored-by:\s*(.+?)\s*<([^>]+)>$/gim;
+
+              for (const commit of commits) {
+                if (commit.author?.login) {
+                  commitLogins.add(commit.author.login.toLowerCase());
+                }
+
+                const message = commit.commit?.message ?? "";
+                let match = null;
+                while ((match = coAuthorPattern.exec(message)) !== null) {
+                  coAuthorEntries.push({
+                    name: match[1].trim(),
+                    email: match[2].trim().toLowerCase()
+                  });
+                }
+              }
+            };
 
             if (!thirdPartyDisclosure) {
               issues.push("必须填写 Third-Party / Copied / Adapted Code Disclosure，若无请明确写 `None.`。");
@@ -128,6 +156,25 @@ jobs:
 
             if (!aiDisclosure) {
               issues.push("必须填写 AI Assistance Disclosure，若无请明确写 `None.`。");
+            }
+
+            await loadCommitMetadata();
+
+            if (coAuthorEntries.length === 0) {
+              if (coAuthorDisclosure && !/^none\.?$/i.test(coAuthorDisclosure)) {
+                issues.push("没有检测到 `Co-authored-by:`，`Co-author Disclosure` 应填写 `None.`。");
+              }
+            } else if (!coAuthorDisclosure || /^none\.?$/i.test(coAuthorDisclosure)) {
+              issues.push(
+                "检测到 commit 中存在 `Co-authored-by:`，必须在 `Co-author Disclosure` 中列出所有共同作者。"
+              );
+            } else {
+              const normalizedDisclosure = coAuthorDisclosure.toLowerCase();
+              for (const coAuthor of coAuthorEntries) {
+                if (!normalizedDisclosure.includes(coAuthor.email)) {
+                  issues.push(`Co-author Disclosure 缺少共同作者邮箱：${coAuthor.email}`);
+                }
+              }
             }
 
             if (organizationChecked) {
@@ -142,11 +189,22 @@ jobs:
                   const response = await github.rest.repos.getContent({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
-                    path: "docs/legal/corporate-authorizations.md",
+                    path: "docs/legal/corporate-authorizations.json",
                     ref: defaultBranch
                   });
                   const content = Buffer.from(response.data.content, "base64").toString("utf8");
-                  const registry = parseRegistry(content);
+                  const parsedRegistry = JSON.parse(content);
+                  const registry = Array.isArray(parsedRegistry)
+                    ? parsedRegistry
+                    : parsedRegistry.authorizations;
+
+                  if (!Array.isArray(registry)) {
+                    issues.push(
+                      "企业授权登记文件格式无效：`docs/legal/corporate-authorizations.json` 缺少 `authorizations` 数组。"
+                    );
+                    throw new Error("invalid corporate authorization registry");
+                  }
+
                   const matchedAuthorization = registry.find(
                     (entry) => normalizeValue(entry.authorizationReference) === normalizeValue(authorizationReference)
                   );
@@ -178,23 +236,17 @@ jobs:
                     }
 
                     const authorizedUsers = splitRegistryCell(
-                      matchedAuthorization.authorizedGitHubUsernames
+                      Array.isArray(matchedAuthorization.authorizedGitHubUsernames)
+                        ? matchedAuthorization.authorizedGitHubUsernames.join(",")
+                        : matchedAuthorization.authorizedGitHubUsernames ?? ""
+                    ).map((item) => item.toLowerCase());
+                    const authorizedEmails = splitRegistryCell(
+                      Array.isArray(matchedAuthorization.authorizedEmails)
+                        ? matchedAuthorization.authorizedEmails.join(",")
+                        : matchedAuthorization.authorizedEmails ?? ""
                     ).map((item) => item.toLowerCase());
                     const wildcardAllowed = authorizedUsers.includes("*");
-                    const commitLogins = new Set();
-                    const commits = await github.paginate(github.rest.pulls.listCommits, {
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      pull_number: prNumber,
-                      per_page: 100
-                    });
-
-                    commitLogins.add(prAuthorLogin.toLowerCase());
-                    for (const commit of commits) {
-                      if (commit.author?.login) {
-                        commitLogins.add(commit.author.login.toLowerCase());
-                      }
-                    }
+                    const wildcardEmailAllowed = authorizedEmails.includes("*");
 
                     if (!wildcardAllowed && authorizedUsers.length === 0) {
                       issues.push(
@@ -212,9 +264,29 @@ jobs:
                         );
                       }
                     }
+
+                    if (coAuthorEntries.length > 0 && !wildcardEmailAllowed) {
+                      if (authorizedEmails.length === 0) {
+                        issues.push(
+                          `授权编号 ${authorizationReference} 检测到共同作者，但没有登记任何 Authorized Emails。`
+                        );
+                      } else {
+                        const unauthorizedCoAuthorEmails = coAuthorEntries
+                          .map((coAuthor) => coAuthor.email)
+                          .filter((email) => !authorizedEmails.includes(email));
+
+                        if (unauthorizedCoAuthorEmails.length > 0) {
+                          issues.push(
+                            `授权编号 ${authorizationReference} 未覆盖这些共同作者邮箱：${unauthorizedCoAuthorEmails.join(", ")}`
+                          );
+                        }
+                      }
+                    }
                   }
                 } catch (error) {
-                  issues.push("无法读取企业授权登记表，请确认 docs/legal/corporate-authorizations.md 存在且可访问。");
+                  if (error.message !== "invalid corporate authorization registry") {
+                    issues.push("无法读取企业授权登记表，请确认 docs/legal/corporate-authorizations.json 存在且可访问。");
+                  }
                 }
               }
             } else {
@@ -232,7 +304,7 @@ jobs:
 
             - 贡献身份声明完整
             - BSL / GPL / 商业授权确认完整
-            - 第三方来源与 AI 披露字段已填写`
+            - 第三方来源、AI 与共同作者披露字段已填写`
               : `${marker}
             PR 合规检查未通过，请按模板补齐以下内容：
 

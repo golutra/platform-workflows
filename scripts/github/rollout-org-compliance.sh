@@ -27,7 +27,7 @@ Options:
                              golutra/platform-workflows.
   --template-source          Local repository path that contains CLA.md, docs/legal/*
                              and the PR template used as rollout source.
-  --workflow-ref             Git ref for the reusable workflow repository. Default: v1.0.0.
+  --workflow-ref             Git ref for the reusable workflow repository. Default: v1.0.1.
   --repo                     Target repository. Can be repeated. If omitted, all repos
                              in the organization are selected.
   --exclude                  Repository to skip. Can be repeated.
@@ -193,7 +193,7 @@ create_signatures_branch_if_missing() {
 org=""
 central_workflow_repo=""
 template_source=""
-workflow_ref="v1.0.0"
+workflow_ref="v1.0.1"
 limit="200"
 signatures_branch="cla-signatures"
 execute="false"

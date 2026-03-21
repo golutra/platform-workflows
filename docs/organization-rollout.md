@@ -41,7 +41,7 @@ scripts/github/rollout-org-compliance.sh \
   --org golutra \
   --central-workflow-repo golutra/platform-workflows \
   --template-source /Users/skyseek/Desktop/project/open/golutra \
-  --workflow-ref v1.0.0 \
+  --workflow-ref v1.0.1 \
   --execute
 ```
 

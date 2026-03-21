@@ -1,0 +1,269 @@
+name: PR Compliance Reusable
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        required: true
+        type: number
+      pr-body:
+        required: false
+        default: ""
+        type: string
+      pr-author-login:
+        required: true
+        type: string
+      default-branch:
+        required: true
+        type: string
+
+jobs:
+  validate-pr-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR declarations
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const prNumber = Number(${{ inputs.pr-number }});
+            const body = ${{ toJson(inputs.pr-body) }};
+            const prAuthorLogin = ${{ toJson(inputs.pr-author-login) }};
+            const defaultBranch = ${{ toJson(inputs.default-branch) }};
+            const marker = "<!-- golutra-pr-compliance -->";
+            const issues = [];
+            const normalizeValue = (value) => value.trim().toLowerCase();
+
+            const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const isChecked = (label) => {
+              const pattern = new RegExp(`- \\[x\\] ${escapeRegExp(label)}`, "i");
+              return pattern.test(body);
+            };
+
+            const extractLine = (label) => {
+              const pattern = new RegExp(`^${escapeRegExp(label)}:\\s*(.+)$`, "mi");
+              const match = body.match(pattern);
+              return match ? match[1].trim() : "";
+            };
+
+            const extractSection = (heading, nextHeading) => {
+              const nextPart = nextHeading ? `\\n## ${escapeRegExp(nextHeading)}` : "$";
+              const pattern = new RegExp(`## ${escapeRegExp(heading)}\\s*\\n([\\s\\S]*?)${nextPart}`, "i");
+              const match = body.match(pattern);
+              return match ? match[1].trim() : "";
+            };
+
+            const splitRegistryCell = (value) =>
+              value
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean);
+
+            const isEmptyRegistryValue = (value) =>
+              !value || /^none\.?$/i.test(value) || /^n\/a$/i.test(value) || value === "-";
+
+            const parseRegistry = (content) => {
+              const lines = content
+                .split("\n")
+                .map((line) => line.trim())
+                .filter((line) => line.startsWith("|"));
+
+              if (lines.length < 3) {
+                return [];
+              }
+
+              return lines
+                .slice(2)
+                .map((line) =>
+                  line
+                    .split("|")
+                    .slice(1, -1)
+                    .map((cell) => cell.trim())
+                )
+                .filter((cells) => cells.length >= 7 && cells.some((cell) => cell !== ""))
+                .map((cells) => ({
+                  authorizationReference: cells[0],
+                  organization: cells[1],
+                  authorizedGitHubUsernames: cells[2],
+                  effectiveDate: cells[3],
+                  expirationDate: cells[4],
+                  status: cells[5],
+                  notes: cells[6]
+                }));
+            };
+
+            const personalLabel = "This contribution is submitted in my personal capacity.";
+            const organizationLabel = "This contribution is submitted on behalf of an organization that already has a signed CCLA on file.";
+            const personalChecked = isChecked(personalLabel);
+            const organizationChecked = isChecked(organizationLabel);
+
+            if (personalChecked === organizationChecked) {
+              issues.push("必须且只能选择一种贡献身份：个人贡献或代表组织贡献。");
+            }
+
+            const requiredLabels = [
+              "I have the legal right to submit this contribution.",
+              "I understand `golutra` may use accepted contributions under BSL 1.1, a future GPL-2.0-or-later change license, and commercial licensing arrangements.",
+              "I have disclosed below any third-party, copied, or adapted code and the relevant source/license details.",
+              "I have reviewed any AI-assisted output included in this PR and confirmed that I have the right to submit it.",
+              "I understand that undisclosed or incompatible third-party code may cause this PR to be rejected or later removed."
+            ];
+
+            for (const label of requiredLabels) {
+              if (!isChecked(label)) {
+                issues.push(`缺少必填确认项：${label}`);
+              }
+            }
+
+            const organizationName = extractLine("Organization name");
+            const authorizationReference = extractLine("Authorization reference");
+            const thirdPartyDisclosure = extractSection(
+              "Third-Party / Copied / Adapted Code Disclosure",
+              "AI Assistance Disclosure"
+            );
+            const aiDisclosure = extractSection("AI Assistance Disclosure", "");
+
+            if (!thirdPartyDisclosure) {
+              issues.push("必须填写 Third-Party / Copied / Adapted Code Disclosure，若无请明确写 `None.`。");
+            }
+
+            if (!aiDisclosure) {
+              issues.push("必须填写 AI Assistance Disclosure，若无请明确写 `None.`。");
+            }
+
+            if (organizationChecked) {
+              if (!organizationName || /^none\.?$/i.test(organizationName)) {
+                issues.push("代表组织贡献时，`Organization name` 不能为空。");
+              }
+
+              if (!authorizationReference || /^none\.?$/i.test(authorizationReference)) {
+                issues.push("代表组织贡献时，`Authorization reference` 必须填写已登记的授权编号。");
+              } else {
+                try {
+                  const response = await github.rest.repos.getContent({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    path: "docs/legal/corporate-authorizations.md",
+                    ref: defaultBranch
+                  });
+                  const content = Buffer.from(response.data.content, "base64").toString("utf8");
+                  const registry = parseRegistry(content);
+                  const matchedAuthorization = registry.find(
+                    (entry) => normalizeValue(entry.authorizationReference) === normalizeValue(authorizationReference)
+                  );
+
+                  if (!matchedAuthorization) {
+                    issues.push(
+                      `未在 docs/legal/corporate-authorizations.md 中找到授权编号：${authorizationReference}`
+                    );
+                  } else {
+                    if (
+                      normalizeValue(matchedAuthorization.organization) !== normalizeValue(organizationName)
+                    ) {
+                      issues.push(
+                        `授权编号 ${authorizationReference} 对应的组织名与 PR 中填写的 \`Organization name\` 不一致。`
+                      );
+                    }
+
+                    if (normalizeValue(matchedAuthorization.status) !== "active") {
+                      issues.push(
+                        `授权编号 ${authorizationReference} 当前状态不是 Active，不能用于企业贡献。`
+                      );
+                    }
+
+                    if (!isEmptyRegistryValue(matchedAuthorization.expirationDate)) {
+                      const expirationDate = Date.parse(matchedAuthorization.expirationDate);
+                      if (!Number.isNaN(expirationDate) && expirationDate < Date.now()) {
+                        issues.push(`授权编号 ${authorizationReference} 已过期。`);
+                      }
+                    }
+
+                    const authorizedUsers = splitRegistryCell(
+                      matchedAuthorization.authorizedGitHubUsernames
+                    ).map((item) => item.toLowerCase());
+                    const wildcardAllowed = authorizedUsers.includes("*");
+                    const commitLogins = new Set();
+                    const commits = await github.paginate(github.rest.pulls.listCommits, {
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: prNumber,
+                      per_page: 100
+                    });
+
+                    commitLogins.add(prAuthorLogin.toLowerCase());
+                    for (const commit of commits) {
+                      if (commit.author?.login) {
+                        commitLogins.add(commit.author.login.toLowerCase());
+                      }
+                    }
+
+                    if (!wildcardAllowed && authorizedUsers.length === 0) {
+                      issues.push(
+                        `授权编号 ${authorizationReference} 没有登记任何 Authorized GitHub Usernames。`
+                      );
+                    }
+
+                    if (!wildcardAllowed) {
+                      const unauthorizedLogins = [...commitLogins].filter(
+                        (login) => !authorizedUsers.includes(login)
+                      );
+                      if (unauthorizedLogins.length > 0) {
+                        issues.push(
+                          `授权编号 ${authorizationReference} 未覆盖这些 GitHub 用户：${unauthorizedLogins.join(", ")}`
+                        );
+                      }
+                    }
+                  }
+                } catch (error) {
+                  issues.push("无法读取企业授权登记表，请确认 docs/legal/corporate-authorizations.md 存在且可访问。");
+                }
+              }
+            } else {
+              if (organizationName && !/^none\.?$/i.test(organizationName)) {
+                issues.push("个人贡献时，`Organization name` 应填写 `None`。");
+              }
+              if (authorizationReference && !/^none\.?$/i.test(authorizationReference)) {
+                issues.push("个人贡献时，`Authorization reference` 应填写 `None`。");
+              }
+            }
+
+            const commentBody = issues.length === 0
+              ? `${marker}
+            PR 合规检查已通过。
+
+            - 贡献身份声明完整
+            - BSL / GPL / 商业授权确认完整
+            - 第三方来源与 AI 披露字段已填写`
+              : `${marker}
+            PR 合规检查未通过，请按模板补齐以下内容：
+
+            ${issues.map((issue) => `- ${issue}`).join("\n")}`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            const existingComment = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: commentBody
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: commentBody
+              });
+            }
+
+            if (issues.length > 0) {
+              core.setFailed(issues.join("\n"));
+            }

@@ -1,0 +1,86 @@
+name: CLA Reusable
+
+on:
+  workflow_call:
+    inputs:
+      event-name:
+        required: true
+        type: string
+      issue-is-pr:
+        required: false
+        default: false
+        type: boolean
+      comment-body:
+        required: false
+        default: ""
+        type: string
+      default-branch:
+        required: true
+        type: string
+      signatures-branch:
+        required: false
+        default: cla-signatures
+        type: string
+      signatures-path:
+        required: false
+        default: .github/cla/signatures.json
+        type: string
+      icla-path:
+        required: false
+        default: docs/legal/ICLA.md
+        type: string
+      ccla-path:
+        required: false
+        default: docs/legal/CCLA.md
+        type: string
+      allowlist:
+        required: false
+        default: seekskyworld,dependabot[bot],github-actions[bot],bot*
+        type: string
+      sign-comment:
+        required: false
+        default: I have read the golutra ICLA and I hereby sign this agreement.
+        type: string
+
+jobs:
+  cla:
+    if: >
+      inputs.event-name == 'pull_request_target' ||
+      (
+        inputs.event-name == 'issue_comment' &&
+        inputs.issue-is-pr &&
+        (
+          inputs.comment-body == inputs.sign-comment ||
+          inputs.comment-body == 'recheck'
+        )
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check and collect CLA signatures
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-document: https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.icla-path }}
+          path-to-signatures: ${{ inputs.signatures-path }}
+          branch: ${{ inputs.signatures-branch }}
+          allowlist: ${{ inputs.allowlist }}
+          custom-pr-sign-comment: ${{ inputs.sign-comment }}
+          custom-notsigned-prcomment: |
+            感谢你的贡献。
+
+            在这个 PR 可以继续审核或合并前，请先阅读并签署 [golutra ICLA](https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.icla-path }})。
+
+            签署方式：
+            在这个 PR 下直接评论下面这句完整文本：
+
+            `${{ inputs.sign-comment }}`
+
+            如果你代表公司、团队或其他组织提交贡献，请先确保对应的 [CCLA/企业授权](https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.ccla-path }}) 已由维护者登记，并在 PR 模板里填写授权编号。
+
+            签署后如果状态没有自动刷新，再评论 `recheck` 触发复检。
+          custom-allsigned-prcomment: |
+            CLA 检查已通过，当前 PR 的贡献者均已完成签署。
+          create-file-commit-message: "chore: initialize CLA signatures store"
+          signed-commit-message: "docs: record CLA signature for $contributorName in #$pullRequestNo"
+          lock-pullrequest-aftermerge: true

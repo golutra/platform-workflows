@@ -34,9 +34,6 @@ jobs:
         uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.CLA_BOT_TOKEN != '' && secrets.CLA_BOT_TOKEN || secrets.GITHUB_TOKEN }}
-        env:
-          COMPLIANCE_PROFILE: ${{ inputs.compliance-profile }}
-          USAGE_LICENSE_CONFIRMATION_LABEL_OVERRIDE: ${{ inputs.usage-license-confirmation-label }}
           script: |
             const profiles = {
               "bsl-change-license-commercial": {
@@ -78,6 +75,9 @@ jobs:
               profile.usageLicenseConfirmationLabel;
 
             core.setOutput("usage_license_confirmation_label", usageLicenseConfirmationLabel);
+        env:
+          COMPLIANCE_PROFILE: ${{ inputs.compliance-profile }}
+          USAGE_LICENSE_CONFIRMATION_LABEL_OVERRIDE: ${{ inputs.usage-license-confirmation-label }}
 
       - name: Validate PR declarations
         uses: actions/github-script@v8

@@ -49,8 +49,8 @@ jobs:
             test -f "${workdir}/repo/docs/legal/ICLA.md"
             test -f "${workdir}/repo/docs/legal/CCLA.md"
             test -f "${workdir}/repo/docs/legal/corporate-authorizations.json"
-            rg -q "I have the legal right to submit this contribution." "${workdir}/repo/.github/pull_request_template.md"
-            rg -q "I have read the ICLA and I hereby sign this agreement." "${workdir}/repo/docs/legal/ICLA.md"
+            grep -Fq "I have the legal right to submit this contribution." "${workdir}/repo/.github/pull_request_template.md"
+            grep -Fq "I have read the ICLA and I hereby sign this agreement." "${workdir}/repo/docs/legal/ICLA.md"
             rm -rf "${workdir}"
           done
 

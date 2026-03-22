@@ -47,7 +47,7 @@ on:
         type: string
       allowlist:
         required: false
-        default: seekskyworld,dependabot[bot],github-actions[bot],bot*
+        default: dependabot[bot],github-actions[bot],bot*
         type: string
       sign-comment:
         required: false

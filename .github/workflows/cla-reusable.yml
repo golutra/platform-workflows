@@ -17,6 +17,10 @@ on:
       default-branch:
         required: true
         type: string
+      compliance-profile:
+        required: false
+        default: bsl-change-license-commercial
+        type: string
       signatures-branch:
         required: false
         default: cla-signatures
@@ -33,13 +37,21 @@ on:
         required: false
         default: docs/legal/CCLA.md
         type: string
+      agreement-display-name:
+        required: false
+        default: ICLA
+        type: string
+      corporate-authorization-display-name:
+        required: false
+        default: CCLA / corporate authorization
+        type: string
       allowlist:
         required: false
         default: seekskyworld,dependabot[bot],github-actions[bot],bot*
         type: string
       sign-comment:
         required: false
-        default: I have read the golutra ICLA and I hereby sign this agreement.
+        default: I have read the ICLA and I hereby sign this agreement.
         type: string
 
 jobs:
@@ -51,11 +63,75 @@ jobs:
         inputs.issue-is-pr &&
         (
           inputs.comment-body == inputs.sign-comment ||
+          inputs.comment-body == 'I have read the ICLA and I hereby sign this agreement.' ||
           inputs.comment-body == 'recheck'
         )
       )
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve compliance profile
+        id: resolve_profile
+        uses: actions/github-script@v8
+        env:
+          COMPLIANCE_PROFILE: ${{ inputs.compliance-profile }}
+          AGREEMENT_DISPLAY_NAME_OVERRIDE: ${{ inputs.agreement-display-name }}
+          CORPORATE_AUTHORIZATION_DISPLAY_NAME_OVERRIDE: ${{ inputs.corporate-authorization-display-name }}
+          SIGN_COMMENT_OVERRIDE: ${{ inputs.sign-comment }}
+        with:
+          script: |
+            const profiles = {
+              "bsl-change-license-commercial": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "apache-2.0": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "mit": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "bsd-3-clause": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "gpl-2.0-or-later": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "gpl-3.0-or-later": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              }
+            };
+
+            const profileName = process.env.COMPLIANCE_PROFILE?.trim() || "bsl-change-license-commercial";
+            const profile = profiles[profileName];
+
+            if (!profile) {
+              core.setFailed(`Unknown compliance profile: ${profileName}`);
+              return;
+            }
+
+            const agreementDisplayName =
+              process.env.AGREEMENT_DISPLAY_NAME_OVERRIDE?.trim() || profile.agreementDisplayName;
+            const corporateAuthorizationDisplayName =
+              process.env.CORPORATE_AUTHORIZATION_DISPLAY_NAME_OVERRIDE?.trim() ||
+              profile.corporateAuthorizationDisplayName;
+            const signComment =
+              process.env.SIGN_COMMENT_OVERRIDE?.trim() || profile.signComment;
+
+            core.setOutput("agreement_display_name", agreementDisplayName);
+            core.setOutput("corporate_authorization_display_name", corporateAuthorizationDisplayName);
+            core.setOutput("sign_comment", signComment);
+
       - name: Check and collect CLA signatures
         uses: contributor-assistant/github-action@v2.6.1
         env:
@@ -65,18 +141,18 @@ jobs:
           path-to-signatures: ${{ inputs.signatures-path }}
           branch: ${{ inputs.signatures-branch }}
           allowlist: ${{ inputs.allowlist }}
-          custom-pr-sign-comment: ${{ inputs.sign-comment }}
+          custom-pr-sign-comment: ${{ steps.resolve_profile.outputs.sign_comment }}
           custom-notsigned-prcomment: |
             感谢你的贡献。
 
-            在这个 PR 可以继续审核或合并前，请先阅读并签署 [golutra ICLA](https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.icla-path }})。
+            在这个 PR 可以继续审核或合并前，请先阅读并签署 [${{ steps.resolve_profile.outputs.agreement_display_name }}](https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.icla-path }})。
 
             签署方式：
             在这个 PR 下直接评论下面这句完整文本：
 
-            `${{ inputs.sign-comment }}`
+            `${{ steps.resolve_profile.outputs.sign_comment }}`
 
-            如果你代表公司、团队或其他组织提交贡献，请先确保对应的 [CCLA/企业授权](https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.ccla-path }}) 已由维护者登记，并在 PR 模板里填写授权编号。
+            如果你代表公司、团队或其他组织提交贡献，请先确保对应的 [${{ steps.resolve_profile.outputs.corporate_authorization_display_name }}](https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.ccla-path }}) 已由维护者登记，并在 PR 模板里填写授权编号。
 
             签署后如果状态没有自动刷新，再评论 `recheck` 触发复检。
           custom-allsigned-prcomment: |

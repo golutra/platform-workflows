@@ -33,9 +33,21 @@ jobs:
   validate-pr-metadata:
     runs-on: ubuntu-latest
     steps:
+      - name: Detect GitHub App token configuration
+        id: detect_app_auth
+        run: |
+          if [ -n "${APP_ID}" ] && [ -n "${APP_PRIVATE_KEY}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          APP_ID: ${{ inputs.app-id }}
+          APP_PRIVATE_KEY: ${{ secrets.CLA_APP_PRIVATE_KEY }}
+
       - name: Create GitHub App token
         id: app_token
-        if: ${{ inputs.app-id != '' && secrets.CLA_APP_PRIVATE_KEY != '' }}
+        if: ${{ steps.detect_app_auth.outputs.enabled == 'true' }}
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.app-id }}

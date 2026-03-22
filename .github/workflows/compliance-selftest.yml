@@ -1,0 +1,64 @@
+name: Compliance Selftest
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate workflow YAML
+        run: |
+          ruby -e 'require "yaml"; Dir[".github/workflows/*.yml"].sort.each { |f| YAML.load_file(f); puts "OK #{f}" }'
+
+      - name: Validate rollout shell
+        run: |
+          bash -n scripts/github/rollout-org-compliance.sh
+          bash -n scripts/github/sync-central-compliance-workflows.sh
+
+      - name: Validate generated compliance files
+        run: |
+          set -euo pipefail
+          prefix_end=$(awk '/^org=""$/ {print NR-1; exit}' scripts/github/rollout-org-compliance.sh)
+          sed -n "1,${prefix_end}p" scripts/github/rollout-org-compliance.sh >/tmp/rollout-functions.sh
+          # shellcheck disable=SC1091
+          source /tmp/rollout-functions.sh
+          profiles=(
+            "bsl-change-license-commercial"
+            "apache-2.0"
+            "mit"
+            "bsd-3-clause"
+            "gpl-2.0-or-later"
+            "gpl-3.0-or-later"
+          )
+          for profile in "${profiles[@]}"; do
+            workdir="$(mktemp -d)"
+            mkdir -p "${workdir}/repo"
+            sync_repository_files "${workdir}/repo" golutra/platform-workflows test-ref "${profile}" "demo-repo"
+            test -f "${workdir}/repo/CLA.md"
+            test -f "${workdir}/repo/.github/pull_request_template.md"
+            test -f "${workdir}/repo/docs/legal/ICLA.md"
+            test -f "${workdir}/repo/docs/legal/CCLA.md"
+            test -f "${workdir}/repo/docs/legal/corporate-authorizations.json"
+            rg -q "I have the legal right to submit this contribution." "${workdir}/repo/.github/pull_request_template.md"
+            rg -q "I have read the ICLA and I hereby sign this agreement." "${workdir}/repo/docs/legal/ICLA.md"
+            rm -rf "${workdir}"
+          done
+
+      - name: Validate corporate authorization registry schema
+        run: |
+          jq -e '
+            .version | type == "number"
+          ' docs/legal/corporate-authorizations.json >/dev/null
+          jq -e '
+            .authorizations | type == "array"
+          ' docs/legal/corporate-authorizations.json >/dev/null

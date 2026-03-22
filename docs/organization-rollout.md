@@ -125,6 +125,15 @@ jobs:
 2. 在组织 ruleset 里把 `CLA` 和 `PR Compliance` 设为 required status checks
 3. 先用 `Evaluate` 模式观察，再切换到 `Active`
 
+如果组织层把 `GITHUB_TOKEN` 默认权限限制为只读，还需要在每个业务仓库设置一个具有 `repo` 和 `workflow` 范围的仓库 secret：
+
+- `CLA_BOT_TOKEN`
+
+中央 reusable workflows 会优先使用这个 secret 来：
+
+- 在 PR 下评论签署提示与合规检查结果
+- 把签署记录写入 `cla-signatures` 分支
+
 ## 企业贡献授权维护
 
 每个业务仓库仍需自己维护：

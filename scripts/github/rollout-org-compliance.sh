@@ -334,6 +334,7 @@ jobs:
       issue-is-pr: \${{ github.event_name == 'issue_comment' && github.event.issue.pull_request != null }}
       comment-body: \${{ github.event.comment.body || '' }}
       default-branch: \${{ github.event.repository.default_branch }}
+      app-id: \${{ vars.CLA_APP_ID }}
       compliance-profile: ${compliance_profile}
 EOF
 }
@@ -369,6 +370,7 @@ jobs:
       pr-body: \${{ github.event.pull_request.body }}
       pr-author-login: \${{ github.event.pull_request.user.login }}
       default-branch: \${{ github.event.repository.default_branch }}
+      app-id: \${{ vars.CLA_APP_ID }}
       compliance-profile: ${compliance_profile}
 EOF
 }

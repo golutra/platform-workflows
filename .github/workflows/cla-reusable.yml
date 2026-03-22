@@ -53,6 +53,10 @@ on:
         required: false
         default: I have read the ICLA and I hereby sign this agreement.
         type: string
+      app-id:
+        required: false
+        default: ""
+        type: string
 
 jobs:
   cla:
@@ -132,10 +136,19 @@ jobs:
             core.setOutput("corporate_authorization_display_name", corporateAuthorizationDisplayName);
             core.setOutput("sign_comment", signComment);
 
+      - name: Create GitHub App token
+        id: app_token
+        if: ${{ inputs.app-id != '' && secrets.CLA_APP_PRIVATE_KEY != '' }}
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app-id }}
+          private-key: ${{ secrets.CLA_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Persist signed contributors
         uses: actions/github-script@v8
         with:
-          github-token: ${{ secrets.CLA_BOT_TOKEN != '' && secrets.CLA_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.app_token.outputs.token || secrets.CLA_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             const prNumber =
               context.payload.pull_request?.number ??
@@ -292,7 +305,7 @@ jobs:
       - name: Check and collect CLA signatures
         uses: contributor-assistant/github-action@v2.6.1
         env:
-          GITHUB_TOKEN: ${{ secrets.CLA_BOT_TOKEN != '' && secrets.CLA_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app_token.outputs.token || secrets.CLA_BOT_TOKEN || secrets.GITHUB_TOKEN }}
         with:
           path-to-document: https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.icla-path }}
           path-to-signatures: ${{ inputs.signatures-path }}

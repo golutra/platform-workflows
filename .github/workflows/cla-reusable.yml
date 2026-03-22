@@ -1,0 +1,319 @@
+name: CLA Reusable
+
+on:
+  workflow_call:
+    inputs:
+      event-name:
+        required: true
+        type: string
+      issue-is-pr:
+        required: false
+        default: false
+        type: boolean
+      comment-body:
+        required: false
+        default: ""
+        type: string
+      default-branch:
+        required: true
+        type: string
+      compliance-profile:
+        required: false
+        default: bsl-change-license-commercial
+        type: string
+      signatures-branch:
+        required: false
+        default: cla-signatures
+        type: string
+      signatures-path:
+        required: false
+        default: .github/cla/signatures.json
+        type: string
+      icla-path:
+        required: false
+        default: docs/legal/ICLA.md
+        type: string
+      ccla-path:
+        required: false
+        default: docs/legal/CCLA.md
+        type: string
+      agreement-display-name:
+        required: false
+        default: ICLA
+        type: string
+      corporate-authorization-display-name:
+        required: false
+        default: CCLA / corporate authorization
+        type: string
+      allowlist:
+        required: false
+        default: dependabot[bot],github-actions[bot],bot*
+        type: string
+      sign-comment:
+        required: false
+        default: I have read the ICLA and I hereby sign this agreement.
+        type: string
+
+jobs:
+  cla:
+    if: >
+      inputs.event-name == 'pull_request_target' ||
+      (
+        inputs.event-name == 'issue_comment' &&
+        inputs.issue-is-pr &&
+        (
+          inputs.comment-body == inputs.sign-comment ||
+          inputs.comment-body == 'I have read the ICLA and I hereby sign this agreement.' ||
+          inputs.comment-body == 'recheck'
+        )
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve compliance profile
+        id: resolve_profile
+        uses: actions/github-script@v8
+        env:
+          COMPLIANCE_PROFILE: ${{ inputs.compliance-profile }}
+          AGREEMENT_DISPLAY_NAME_OVERRIDE: ${{ inputs.agreement-display-name }}
+          CORPORATE_AUTHORIZATION_DISPLAY_NAME_OVERRIDE: ${{ inputs.corporate-authorization-display-name }}
+          SIGN_COMMENT_OVERRIDE: ${{ inputs.sign-comment }}
+        with:
+          script: |
+            const profiles = {
+              "bsl-change-license-commercial": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "apache-2.0": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "mit": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "bsd-3-clause": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "gpl-2.0-or-later": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              },
+              "gpl-3.0-or-later": {
+                agreementDisplayName: "ICLA",
+                corporateAuthorizationDisplayName: "CCLA / corporate authorization",
+                signComment: "I have read the ICLA and I hereby sign this agreement."
+              }
+            };
+
+            const profileName = process.env.COMPLIANCE_PROFILE?.trim() || "bsl-change-license-commercial";
+            const profile = profiles[profileName];
+
+            if (!profile) {
+              core.setFailed(`Unknown compliance profile: ${profileName}`);
+              return;
+            }
+
+            const agreementDisplayName =
+              process.env.AGREEMENT_DISPLAY_NAME_OVERRIDE?.trim() || profile.agreementDisplayName;
+            const corporateAuthorizationDisplayName =
+              process.env.CORPORATE_AUTHORIZATION_DISPLAY_NAME_OVERRIDE?.trim() ||
+              profile.corporateAuthorizationDisplayName;
+            const signComment =
+              process.env.SIGN_COMMENT_OVERRIDE?.trim() || profile.signComment;
+
+            core.setOutput("agreement_display_name", agreementDisplayName);
+            core.setOutput("corporate_authorization_display_name", corporateAuthorizationDisplayName);
+            core.setOutput("sign_comment", signComment);
+
+      - name: Persist signed contributors
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.CLA_BOT_TOKEN != '' && secrets.CLA_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber =
+              context.payload.pull_request?.number ??
+              context.payload.issue?.number ??
+              context.issue.number;
+
+            if (!prNumber) {
+              core.info("No pull request number found; skip signature persistence.");
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const signaturesBranch = ${{ toJson(inputs.signatures-branch) }};
+            const signaturesPath = ${{ toJson(inputs.signatures-path) }};
+            const signComment = ${{ toJson(steps.resolve_profile.outputs.sign_comment) }}.trim().toLowerCase();
+            const acceptedBodies = new Set([
+              signComment,
+              "i have read the icla and i hereby sign this agreement."
+            ]);
+
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100
+            });
+
+            const committers = new Map();
+            for (const commit of commits) {
+              if (commit.author?.id) {
+                committers.set(commit.author.id, {
+                  id: commit.author.id,
+                  login: commit.author.login
+                });
+              }
+            }
+
+            const pr = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber
+            });
+
+            if (pr.data.user?.id) {
+              committers.set(pr.data.user.id, {
+                id: pr.data.user.id,
+                login: pr.data.user.login
+              });
+            }
+
+            if (committers.size === 0) {
+              core.info("No GitHub-linked committers found; skip signature persistence.");
+              return;
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100
+            });
+
+            const signerComments = new Map();
+            for (const comment of comments) {
+              const normalizedBody = (comment.body || "").trim().toLowerCase();
+              if (!acceptedBodies.has(normalizedBody)) {
+                continue;
+              }
+              if (!comment.user?.id || comment.user.login === "github-actions[bot]") {
+                continue;
+              }
+              signerComments.set(comment.user.id, {
+                id: comment.user.id,
+                login: comment.user.login,
+                comment_id: comment.id,
+                created_at: comment.created_at
+              });
+            }
+
+            const repoId = context.payload.repository?.id ?? (await github.rest.repos.get({ owner, repo })).data.id;
+            const signedCommitters = [];
+            for (const [id, committer] of committers.entries()) {
+              const signer = signerComments.get(id);
+              if (!signer) {
+                continue;
+              }
+              signedCommitters.push({
+                name: signer.login || committer.login,
+                id,
+                comment_id: signer.comment_id,
+                created_at: signer.created_at,
+                repoId,
+                pullRequestNo: prNumber
+              });
+            }
+
+            if (signedCommitters.length === 0) {
+              core.info("No matching signed committers found; skip signature persistence.");
+              return;
+            }
+
+            let sha;
+            let signatureStore = { signedContributors: [] };
+
+            try {
+              const existing = await github.rest.repos.getContent({
+                owner,
+                repo,
+                path: signaturesPath,
+                ref: signaturesBranch
+              });
+              if (Array.isArray(existing.data)) {
+                throw new Error(`${signaturesPath} must be a file`);
+              }
+              sha = existing.data.sha;
+              signatureStore = JSON.parse(Buffer.from(existing.data.content, "base64").toString("utf8"));
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+
+            const existingIds = new Set(
+              Array.isArray(signatureStore.signedContributors)
+                ? signatureStore.signedContributors
+                    .map((entry) => Number(entry?.id))
+                    .filter((value) => Number.isFinite(value))
+                : []
+            );
+
+            const newEntries = signedCommitters.filter((entry) => !existingIds.has(Number(entry.id)));
+            if (newEntries.length === 0) {
+              core.info("Signed contributors already persisted.");
+              return;
+            }
+
+            signatureStore.signedContributors = [
+              ...(Array.isArray(signatureStore.signedContributors) ? signatureStore.signedContributors : []),
+              ...newEntries
+            ];
+
+            const content = Buffer.from(`${JSON.stringify(signatureStore, null, 2)}\n`).toString("base64");
+            await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo,
+              path: signaturesPath,
+              branch: signaturesBranch,
+              sha,
+              message: `docs: record CLA signature(s) for #${prNumber}`,
+              content
+            });
+
+      - name: Check and collect CLA signatures
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.CLA_BOT_TOKEN != '' && secrets.CLA_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+        with:
+          path-to-document: https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.icla-path }}
+          path-to-signatures: ${{ inputs.signatures-path }}
+          branch: ${{ inputs.signatures-branch }}
+          allowlist: ${{ inputs.allowlist }}
+          custom-pr-sign-comment: ${{ steps.resolve_profile.outputs.sign_comment }}
+          custom-notsigned-prcomment: |
+            感谢你的贡献。
+
+            在这个 PR 可以继续审核或合并前，请先阅读并签署 [${{ steps.resolve_profile.outputs.agreement_display_name }}](https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.icla-path }})。
+
+            签署方式：
+            在这个 PR 下直接评论下面这句完整文本：
+
+            `${{ steps.resolve_profile.outputs.sign_comment }}`
+
+            如果你代表公司、团队或其他组织提交贡献，请先确保对应的 [${{ steps.resolve_profile.outputs.corporate_authorization_display_name }}](https://github.com/${{ github.repository }}/blob/${{ inputs.default-branch }}/${{ inputs.ccla-path }}) 已由维护者登记，并在 PR 模板里填写授权编号。
+
+            签署后如果状态没有自动刷新，再评论 `recheck` 触发复检。
+          custom-allsigned-prcomment: |
+            CLA 检查已通过，当前 PR 的贡献者均已完成签署。
+          create-file-commit-message: "chore: initialize CLA signatures store"
+          signed-commit-message: "docs: record CLA signature for $contributorName in #$pullRequestNo"
+          lock-pullrequest-aftermerge: true

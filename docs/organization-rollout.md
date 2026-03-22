@@ -41,7 +41,7 @@ scripts/github/rollout-org-compliance.sh \
   --org golutra \
   --central-workflow-repo golutra/platform-workflows \
   --compliance-profile bsl-change-license-commercial \
-  --workflow-ref v1.1.1 \
+  --workflow-ref 0.1.0 \
   --execute
 ```
 
@@ -78,12 +78,13 @@ caller workflow 会统一变成只传 profile 的形式：
 ```yaml
 jobs:
   cla:
-    uses: golutra/platform-workflows/.github/workflows/cla-reusable.yml@v1.1.1
+    uses: golutra/platform-workflows/.github/workflows/cla-reusable.yml@0.1.0
     with:
       event-name: ${{ github.event_name }}
       issue-is-pr: ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request != null }}
       comment-body: ${{ github.event.comment.body || '' }}
       default-branch: ${{ github.event.repository.default_branch }}
+      app-id: ${{ vars.CLA_APP_ID }}
       compliance-profile: bsl-change-license-commercial
 ```
 
@@ -127,9 +128,11 @@ jobs:
 
 如果组织层把 `GITHUB_TOKEN` 默认权限限制为只读，还需要在每个业务仓库设置一个具有 `repo` 和 `workflow` 范围的仓库 secret：
 
-- `CLA_BOT_TOKEN`
+- repository variable `CLA_APP_ID`
+- repository secret `CLA_APP_PRIVATE_KEY`
+- 可选：仓库 secret `CLA_BOT_TOKEN` 作为兼容兜底
 
-中央 reusable workflows 会优先使用这个 secret 来：
+中央 reusable workflows 会优先使用 GitHub App token；如果没有配置成功，再回退到 `CLA_BOT_TOKEN`，最后才回退到 `GITHUB_TOKEN`。它们会用这个 token 来：
 
 - 在 PR 下评论签署提示与合规检查结果
 - 把签署记录写入 `cla-signatures` 分支

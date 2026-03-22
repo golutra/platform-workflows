@@ -1,0 +1,45 @@
+# Logs
+logs
+log/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node / frontend build outputs
+node_modules/
+.pnpm-store/
+dist/
+dist-ssr/
+*.local
+
+# Workspace-local / temporary artifacts
+.golutra/
+.tmp/
+.tmp-*/
+.tmp-xterm/
+.tmp-xterm-patch-*/
+
+# Rust / Tauri build outputs
+target/
+src-tauri/target/
+src-tauri/target-*/
+src-tauri/vendor/
+src-tauri/binaries/
+
+# OS / editor files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.tmp
+*.temp
+*~
